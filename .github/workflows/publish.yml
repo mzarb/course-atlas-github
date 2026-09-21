@@ -1,0 +1,51 @@
+name: Build course diagrams and publish
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install PDF reader
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - name: Check extraction
+        run: python3 -m unittest discover -s tests -v
+      - name: Generate gallery
+        run: python3 scripts/build_gallery.py
+      - name: Check browser script
+        run: node --check web/app.js
+      - name: Include extraction report
+        if: always()
+        run: |
+          if [ -f validation-report.json ]; then
+            echo '### PDF extraction report' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat validation-report.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          path: dist
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish gallery
+        id: deployment
+        uses: actions/deploy-pages@v4
