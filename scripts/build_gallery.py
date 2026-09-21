@@ -49,7 +49,9 @@ def parse(text,filename):
   credits=re.search(r'(?:Yes\s+)?\d+\.\d+\s+(\d+)(?:\s+Level\s+\d+)?\s*$',rest)
   value=int(credits[1]) if credits else None
   group='electives' in c.lower()
-  item={'stage':current[0],'semester':current[1],'code':c,'title':name,'credits':value,'type':'elective' if group else kind,'page':page,'additional':False}
+  route_match=re.search(r'\bRoutes?\s+([A-Z](?:,\s*[A-Z])*)\b',rest)
+  row_routes=re.findall(r'[A-Z]',route_match[1]) if route_match else []
+  item={'stage':current[0],'semester':current[1],'code':c,'title':name,'credits':value,'type':'elective' if group else kind,'page':page,'additional':False,'routeIds':row_routes,'spansSemesters':2 if 'Undertaken over two semesters' in rest else 1}
   key=(current,c)
   if key in seen:
    old=modules[seen[key]]
@@ -65,17 +67,24 @@ def parse(text,filename):
   for m in modules:
    peers=[x for x in modules if (x['stage'],x['semester'])==(m['stage'],m['semester'])]
    if m['semester']==3 and len(peers)==1 and m['type']=='elective':m['additional']=True
+ flat=' '.join(text.split())
+ for m in modules:
+  if re.search(r'\b'+re.escape(m['code'])+r'\s+[^.]*?is for additional credit only\.',flat):m['additional']=True
+ route_names=dict(re.findall(r'Route ([A-Z]) - ([^.\n]+)\.',text))
+ used_routes=sorted({r for m in modules for r in m['routeIds']})
+ pathways={r:route_names[r].strip() for r in used_routes if r in route_names}
  known=all(m['credits'] is not None for m in modules)
  if not known:warnings.append('Individual module/group credits are not included in this export. They have not been inferred.')
  if pg:warnings.append('This export does not identify the full-time/part-time allocation of each schedule row. Intake sequences are confirmed from the narrative; the module lists are a combined source schedule, not a verified route timetable.')
  if any(m['type']=='elective' for m in modules):warnings.append('Elective groups are shown as slots. Their individual choices are not included in this course PDF.')
  if 'CM1112' in text and any(m['code']=='CE1337' for m in modules):warnings.append('The delivery table lists CE1337 Programming Bootcamp; a narrative note still refers to CM1112 Introduction to Programming. The diagram follows the table.')
  if known and not pg:
-  total=sum(m['credits'] for m in modules if not m['additional'])
-  if total!=int(credit[1]):raise ValueError(f'Listed award credits ({total}) do not match declared award credits ({credit[1]}). Review delivery variants or optional modules before publishing.')
+  for route in (list(pathways) or [None]):
+   total=sum(m['credits'] for m in modules if not m['additional'] and (route is None or not m['routeIds'] or route in m['routeIds']))
+   if total!=int(credit[1]):raise ValueError(f'Listed award credits ({total}) do not match declared award credits ({credit[1]})'+(f' for Route {route}' if route else '')+'. Review delivery variants or optional modules before publishing.')
  routes=intake_routes(text) if pg else {}
  if pg and not routes:warnings.append('No intake sequences were recognised. Only the published semester schedule is shown.')
- return {'id':code,'title':title,'level':'PG' if pg else 'UG','awardCredits':int(credit[1]),'sourceDate':date.strip(),'sourceFile':filename,'modules':modules,'routes':routes,'warnings':warnings,'duplicatesCollapsed':duplicates,'allocationVerified':not pg,'creditTotalChecked':known and not pg}
+ return {'id':code,'title':title,'level':'PG' if pg else 'UG','awardCredits':int(credit[1]),'sourceDate':date.strip(),'sourceFile':filename,'modules':modules,'routes':routes,'pathways':pathways,'warnings':warnings,'duplicatesCollapsed':duplicates,'allocationVerified':not pg,'creditTotalChecked':known and not pg}
 
 def group_key(code):
  return re.sub(r'\s+', '', code.upper())
@@ -124,7 +133,7 @@ def build(source,out):
  for c in courses:
   unresolved=[]
   for m in c['modules']:
-   if m['type']!='elective':continue
+   if m['type']!='elective' or 'electives' not in m['code'].lower():continue
    g=groups.get(group_key(m['code']))
    if not g:unresolved.append(m['code']);continue
    members=[x for x in g['members'] if x['stage']==m['stage'] and x['semester']==m['semester']]
