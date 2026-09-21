@@ -101,6 +101,8 @@ def parse_group(text, filename):
  return {'code':code[1].strip(),'title':re.sub(r'\s+APPROVED$','',title[1].strip()),'rule':'Choose one from','members':members,'sourceFile':filename}
 
 def build(source,out):
+ for asset in ('index.html','app.js','style.css'):
+  if not (ROOT/'web'/asset).is_file():raise ValueError('Missing website file: web/'+asset+'. Restore it before publishing.')
  pdfs=sorted(p for p in source.rglob('*') if p.suffix.lower()=='.pdf')
  if not pdfs:raise ValueError('No PDFs found in '+str(source))
  courses=[];groups={};errors=[]
