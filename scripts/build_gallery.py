@@ -2,8 +2,8 @@
 from pathlib import Path
 import argparse, datetime, hashlib, json, re, shutil, subprocess, sys
 ROOT=Path(__file__).resolve().parents[1]
-CODE=r'(?:PS\d+\s*-\s*Electives\s+\d+|\d{4}\s*-\s*Electives\s+\d+|[A-Z]{2,4}\d{3,4})'
-ROW=re.compile(r'^\s*('+CODE+r')\s{2,}(.+?)\s*$')
+CODE=r'(?:PS\d+\s*-\s*Electives\s*\d+|\d{4}\s*-\s*Electives\s*\d+|[A-Z]{2,4}\d{3,4})'
+ROW=re.compile(r'^\s*(?:(?:Full|Time|On|Campus)\s+)*('+CODE+r')\s{2,}(.+?)\s*$')
 
 def extract(path):
  p=subprocess.run(['pdftotext','-layout',str(path),'-'],capture_output=True,text=True,check=True)
@@ -64,7 +64,7 @@ def parse(text,filename):
  if exclusion and not pg:
   for m in modules:
    peers=[x for x in modules if (x['stage'],x['semester'])==(m['stage'],m['semester'])]
-   if m['semester']==3 and len(peers)==1 and m['type']=='elective' and m['credits']==120:m['additional']=True
+   if m['semester']==3 and len(peers)==1 and m['type']=='elective':m['additional']=True
  known=all(m['credits'] is not None for m in modules)
  if not known:warnings.append('Individual module/group credits are not included in this export. They have not been inferred.')
  if pg:warnings.append('This export does not identify the full-time/part-time allocation of each schedule row. Intake sequences are confirmed from the narrative; the module lists are a combined source schedule, not a verified route timetable.')
@@ -78,14 +78,20 @@ def parse(text,filename):
  return {'id':code,'title':title,'level':'PG' if pg else 'UG','awardCredits':int(credit[1]),'sourceDate':date.strip(),'sourceFile':filename,'modules':modules,'routes':routes,'warnings':warnings,'duplicatesCollapsed':duplicates,'allocationVerified':not pg,'creditTotalChecked':known and not pg}
 
 def group_key(code):
- return ' '.join(code.upper().split())
+ return re.sub(r'\s+', '', code.upper())
 
 def parse_group(text, filename):
  code=re.search(r'^\s*Group Code\s+(.+)$',text,re.M)
  title=re.search(r'^\s*Group Title\s+(.+)$',text,re.M)
  if not code or not title:raise ValueError('Group code or title not found')
  members=[];page=1
- for line in text.split('\n'):
+ lines=text.split('\n')
+ for index,line in enumerate(lines):
+  if re.match(r'^\s*\d+\s+Semester\s+Elective\s+',line):
+   following=lines[index+1] if index+1<len(lines) else ''
+   number=re.fullmatch(r'\s*(\d+)\s*',following)
+   if not number:raise ValueError('Wrapped semester number not recognised')
+   line=line.replace('Semester', 'Semester '+number[1],1)
   page+=line.count('\f')
   m=re.match(r'^\s*(\d+)\s+Semester\s+(\d+)\s+Elective\s+([A-Z]{2,4}\d{3,4})\s{2,}(.+?)\s{2,}(?:Yes|No)\s+\d+\.\d+\s+(\d+)\s*$',line)
   if m:
@@ -103,7 +109,12 @@ def build(source,out):
    text=extract(p)
    if re.search(r'^\s*Group Code\s+',text,re.M):
     g=parse_group(text,p.name);key=group_key(g['code'])
-    if key in groups:raise ValueError('Duplicate elective group: '+g['code'])
+    if key in groups:
+     old=groups[key]
+     if ' '.join(text.split())==old['_text']:
+      print('Identical group copy ignored: '+p.name);continue
+     raise ValueError('Conflicting duplicate elective group: '+g['code'])
+    g['_text']=' '.join(text.split())
     g['_path']=p;groups[key]=g;continue
    c=parse(text,p.name);c['sha256']=hashlib.sha256(p.read_bytes()).hexdigest();c['_path']=p;courses.append(c)
   except Exception as e:errors.append(f'{p.name}: {e}')
@@ -115,9 +126,13 @@ def build(source,out):
    g=groups.get(group_key(m['code']))
    if not g:unresolved.append(m['code']);continue
    members=[x for x in g['members'] if x['stage']==m['stage'] and x['semester']==m['semester']]
+   if not members and m['additional']:
+    members=g['members']
+    m['groupNote']='The course references this additional group here; the group PDF lists its choices under '+', '.join(sorted({f"Stage {x['stage']} / Semester {x['semester']}" for x in members}))+'. Confirm availability with the course team.'
+    c['warnings'].append(m['code']+': '+m['groupNote'])
    if not members:
     errors.append(f"{c['id']}: {m['code']} has no choices for this stage/semester");continue
-   if m['credits'] is not None and any(x['credits']!=m['credits'] for x in members):
+   if not m['additional'] and m['credits'] is not None and any(x['credits']!=m['credits'] for x in members):
     errors.append(f"{c['id']}: {m['code']} choice credits differ from the course slot");continue
    m['choices']=members;m['selectionRule']='Choose one from'
    m['groupSource']='pdfs/group-'+re.sub(r'[^a-z0-9]+','-',group_key(g['code']).lower()).strip('-')+'.pdf'
