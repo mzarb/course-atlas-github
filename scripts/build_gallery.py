@@ -77,14 +77,52 @@ def parse(text,filename):
  if pg and not routes:warnings.append('No intake sequences were recognised. Only the published semester schedule is shown.')
  return {'id':code,'title':title,'level':'PG' if pg else 'UG','awardCredits':int(credit[1]),'sourceDate':date.strip(),'sourceFile':filename,'modules':modules,'routes':routes,'warnings':warnings,'duplicatesCollapsed':duplicates,'allocationVerified':not pg,'creditTotalChecked':known and not pg}
 
+def group_key(code):
+ return ' '.join(code.upper().split())
+
+def parse_group(text, filename):
+ code=re.search(r'^\s*Group Code\s+(.+)$',text,re.M)
+ title=re.search(r'^\s*Group Title\s+(.+)$',text,re.M)
+ if not code or not title:raise ValueError('Group code or title not found')
+ members=[];page=1
+ for line in text.split('\n'):
+  page+=line.count('\f')
+  m=re.match(r'^\s*(\d+)\s+Semester\s+(\d+)\s+Elective\s+([A-Z]{2,4}\d{3,4})\s{2,}(.+?)\s{2,}(?:Yes|No)\s+\d+\.\d+\s+(\d+)\s*$',line)
+  if m:
+   stage,sem,c,name,credits=m.groups()
+   members.append({'stage':int(stage),'semester':int(sem),'code':c,'title':name.strip(),'credits':int(credits),'page':page})
+ if not members:raise ValueError('No elective module rows recognised')
+ return {'code':code[1].strip(),'title':re.sub(r'\s+APPROVED$','',title[1].strip()),'rule':'Choose one from','members':members,'sourceFile':filename}
+
 def build(source,out):
  pdfs=sorted(p for p in source.rglob('*') if p.suffix.lower()=='.pdf')
  if not pdfs:raise ValueError('No PDFs found in '+str(source))
- courses=[];errors=[]
+ courses=[];groups={};errors=[]
  for p in pdfs:
   try:
-   c=parse(extract(p),p.name);c['sha256']=hashlib.sha256(p.read_bytes()).hexdigest();c['_path']=p;courses.append(c)
+   text=extract(p)
+   if re.search(r'^\s*Group Code\s+',text,re.M):
+    g=parse_group(text,p.name);key=group_key(g['code'])
+    if key in groups:raise ValueError('Duplicate elective group: '+g['code'])
+    g['_path']=p;groups[key]=g;continue
+   c=parse(text,p.name);c['sha256']=hashlib.sha256(p.read_bytes()).hexdigest();c['_path']=p;courses.append(c)
   except Exception as e:errors.append(f'{p.name}: {e}')
+ if not courses:errors.append('No course PDFs found')
+ for c in courses:
+  unresolved=[]
+  for m in c['modules']:
+   if m['type']!='elective':continue
+   g=groups.get(group_key(m['code']))
+   if not g:unresolved.append(m['code']);continue
+   members=[x for x in g['members'] if x['stage']==m['stage'] and x['semester']==m['semester']]
+   if not members:
+    errors.append(f"{c['id']}: {m['code']} has no choices for this stage/semester");continue
+   if m['credits'] is not None and any(x['credits']!=m['credits'] for x in members):
+    errors.append(f"{c['id']}: {m['code']} choice credits differ from the course slot");continue
+   m['choices']=members;m['selectionRule']='Choose one from'
+   m['groupSource']='pdfs/group-'+re.sub(r'[^a-z0-9]+','-',group_key(g['code']).lower()).strip('-')+'.pdf'
+  c['warnings']=[w for w in c['warnings'] if not w.startswith('Elective groups are shown')]
+  if unresolved:c['warnings'].append('Group PDFs not yet supplied for: '+', '.join(sorted(set(unresolved)))+'. These remain unexpanded slots.')
  ids=[c['id'] for c in courses]
  if len(ids)!=len(set(ids)):errors.append('More than one PDF has the same course code. Replace the old PDF instead of retaining two versions.')
  report={'courses':[{'id':c['id'],'title':c['title'],'warnings':c['warnings']} for c in courses],'errors':errors}
@@ -92,6 +130,9 @@ def build(source,out):
  if errors:raise ValueError('\n'.join(errors))
  if out.exists():shutil.rmtree(out)
  shutil.copytree(ROOT/'web',out);(out/'pdfs').mkdir()
+ for g in groups.values():
+  dest='group-'+re.sub(r'[^a-z0-9]+','-',group_key(g['code']).lower()).strip('-')+'.pdf'
+  shutil.copy2(g['_path'],out/'pdfs'/dest)
  for c in courses:
   sourcepath=c.pop('_path'); dest=c['id']+'.pdf';shutil.copy2(sourcepath,out/'pdfs'/dest);c['sourceFile']='pdfs/'+dest
  data={'builtAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'courses':courses}
