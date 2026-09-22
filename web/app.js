@@ -114,14 +114,13 @@ function renderRoutes() {
 function card(item) {
   const element = document.createElement('button');
   element.type = 'button';
-  const project = /capstone project|msc project/i.test(item.title);
   const kind = item.sourceConflict ? 'conflict' : item.additional ? 'additional' : item.type;
-  element.className = 'card ' + kind + (project ? ' project' : '');
+  element.className = 'card ' + kind;
   const creditText = item.credits === null
     ? 'Credits not listed'
     : item.credits + (item.additional ? ' group credits' : ' credits');
   const statusText = item.sourceConflict ? ' · Source conflict' : item.additional ? ' · Outside award' : '';
-  element.innerHTML = `<span class="code">${esc(item.code)}</span><span class="name">${esc(item.title)}</span>${project && item.credits !== null ? '<span class="big-credit">' + item.credits + ' credits</span>' : ''}<span class="card-bottom"><span>${creditText}${statusText}</span><span aria-hidden="true">›</span></span>`;
+  element.innerHTML = `<span class="code">${esc(item.code)}</span><span class="name">${esc(item.title)}</span><span class="card-bottom"><span>${creditText}${statusText}</span><span aria-hidden="true">›</span></span>`;
 
   if (item.choices) {
     element.title = 'Choose one from: ' + item.choices.map(choice => choice.code + ' — ' + choice.title).join('; ');
@@ -246,9 +245,11 @@ function renderMap() {
       const items = rows.filter(item => item.semester === semester);
       const cell = semesterBlock(items, semester);
       if (!items.length) {
+        // Keep the grid track so semesters line up between stages, but do not
+        // render a misleading empty semester heading/placeholder.
         cell.classList.add('empty-semester');
-        cell.querySelector('.semester-heading span').textContent = '';
-        cell.querySelector('.cards').innerHTML = '<p class="empty-note">No modules listed</p>';
+        cell.replaceChildren();
+        cell.setAttribute('aria-hidden', 'true');
       }
       box.append(cell);
     }
@@ -263,12 +264,12 @@ function showModule(item) {
 
   let explanation = item.type === 'elective'
     ? 'This course document identifies an elective group.'
-    : 'Module-level outcomes, assessments and prerequisites are not included in this course export.';
+    : '';
   if (item.sourceConflict) {
     explanation = 'This row has contradictory delivery-route metadata in the source document. It is retained for review but excluded from the validated route totals rather than being silently assigned to a route.';
   }
 
-  $('detail-body').innerHTML = `<dl><div><dt>Listed location</dt><dd>Stage ${item.stage} · Semester ${item.semester}</dd></div><div><dt>SCQF credits</dt><dd>${item.credits === null ? 'Not in this export' : item.credits}</dd></div></dl><p>${esc(explanation)}</p>${item.additional ? '<p>Additional placement / study-abroad options do not contribute to the award credit total.</p>' : ''}${course.level === 'PG' ? '<p class="notice">This is a row from the combined schedule. Its full-time / part-time allocation is not identified in the PDF.</p>' : ''}`;
+  $('detail-body').innerHTML = `<dl><div><dt>Listed location</dt><dd>Stage ${item.stage} · Semester ${item.semester}</dd></div><div><dt>SCQF credits</dt><dd>${item.credits === null ? 'Not in this export' : item.credits}</dd></div></dl>${explanation ? '<p>' + esc(explanation) + '</p>' : ''}${item.additional ? '<p>Additional placement / study-abroad options do not contribute to the award credit total.</p>' : ''}${course.level === 'PG' ? '<p class="notice">This is a row from the combined schedule. Its full-time / part-time allocation is not identified in the PDF.</p>' : ''}`;
 
   if (item.choices) {
     $('detail-body').innerHTML = '<h3>Choose one from</h3><ul class="choice-list">' + item.choices.map(choice => '<li><strong>' + esc(choice.code) + ' · ' + esc(choice.title) + '</strong><span>' + choice.credits + ' credits</span></li>').join('') + '</ul><p>' +
