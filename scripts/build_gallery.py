@@ -7,6 +7,7 @@ CODE = r'(?:PS\d+\s*-\s*Electives\s*\d+|\d{4}\s*-\s*Electives\s*\d+|[A-Z]{2,4}\d
 CODE_RE = re.compile(r'(?<!\S)(' + CODE + r')(?=\s{2,}|\s*$)')
 CREDIT_RE = re.compile(r'(?:Yes|No)?\s*\d+\.\d+\s+(\d+)(?:\s+(?:Level(?:\s+\d+)?|\d+))?\s*$')
 DELIVERY_NAMES = {'FAST_TRACK': 'Fast Track', 'FIVE_YEAR': 'Five Year'}
+SPANS_TWO_RE = re.compile(r'(?:module\s+is\s+)?(?:undertaken\s+over|spans?|spanning)\s+(?:two|2)\s+(?:teaching\s+periods?|semesters?)', re.I)
 
 
 def extract(path):
@@ -380,7 +381,7 @@ def parse(text, filename):
             '_pgContexts': pg_contexts,
             '_pgVariants': pg_variants,
             'intakeIds': row_intakes,
-            'spansSemesters': 2 if re.search(r'Undertaken over two semesters', local, re.I) else 1
+            'spansSemesters': 2 if SPANS_TWO_RE.search(local) else 1
         }
 
         key = (current, c)
@@ -404,6 +405,36 @@ def parse(text, filename):
 
     if not modules:
         raise ValueError('No stage/semester module rows found; scanned or unsupported PDF')
+
+    # Akari sometimes repeats a single module in each semester that it spans.
+    # When the CAD explicitly says that the module spans two semesters, retain
+    # both rows for the timetable but count its credits only once. This is not
+    # a credit-validation bypass: the source must explicitly identify the span,
+    # repeated rows must agree on title/credits, and the number of occurrences
+    # cannot exceed the stated span.
+    if not pg:
+        by_stage_code = {}
+        for item in modules:
+            by_stage_code.setdefault((item['stage'], item['code']), []).append(item)
+        for (stage, module_code), occurrences in by_stage_code.items():
+            span = max(item.get('spansSemesters', 1) for item in occurrences)
+            if span <= 1 or len(occurrences) <= 1:
+                continue
+            titles = {item['title'] for item in occurrences}
+            credits = {item['credits'] for item in occurrences}
+            if len(titles) != 1 or len(credits) != 1:
+                raise ValueError(f'{module_code}: repeated spanning-module rows disagree on title or credits')
+            if len(occurrences) > span:
+                raise ValueError(
+                    f'{module_code}: listed in {len(occurrences)} semesters at Stage {stage}, '
+                    f'but the source identifies a {span}-semester span'
+                )
+            ordered = sorted(occurrences, key=lambda item: item['semester'])
+            for item in ordered:
+                item['spansSemesters'] = span
+            for item in ordered[1:]:
+                item['creditContinuation'] = True
+                item['excludedFromAward'] = True
 
     warnings = []
     flat = ' '.join(text.split())
