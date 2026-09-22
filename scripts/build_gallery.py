@@ -21,11 +21,11 @@ def _month_year_steps(sequence):
     last = 0
     for x in re.finditer(r'Semester\s+(\d+)\s*\(([^)]+)\)', sequence, re.I):
         detail = x.group(2)
-        month = re.search(r'(?:taken\s+in\s+)?(September|January|May)', detail, re.I)
+        month = re.search(r'(?:taken\s+in\s+)?(September|January|February|May)', detail, re.I)
         if not month:
             continue
         month_name = month.group(1).title()
-        monthnum = {'January': 1, 'May': 5, 'September': 9}[month_name]
+        monthnum = {'January': 1, 'February': 2, 'May': 5, 'September': 9}[month_name]
         if monthnum < last:
             year += 1
         last = monthnum
@@ -57,7 +57,7 @@ def intake_routes(text):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(flat)
         block = flat[match.end():end]
         by_intake = result.setdefault(mode, {})
-        entry_matches = list(re.finditer(r'For\s+(September|January)\s+entry,\s+the\s+sequence\s+of\s+modules\s+will\s+be:\s*', block, re.I))
+        entry_matches = list(re.finditer(r'For\s+(September|January|February)\s+entry,\s+the\s+sequence\s+of\s+modules\s+will\s+be:\s*', block, re.I))
         for j, entry in enumerate(entry_matches):
             intake = entry.group(1).title()
             stop = entry_matches[j + 1].start() if j + 1 < len(entry_matches) else len(block)
@@ -102,7 +102,15 @@ def extract_route_names(text):
 
 
 def pg_delivery_id(mode, delivery):
-    return ('FULL' if mode == 'Full-Time' else 'PART') + ('_ONLINE' if delivery == 'Online' else '_CAMPUS')
+    prefix = 'FULL' if mode == 'Full-Time' else 'PART'
+    suffix = {
+        'Online': '_ONLINE',
+        'On-Campus': '_CAMPUS',
+        'Work-Based': '_WORK_BASED',
+    }.get(delivery)
+    if suffix is None:
+        raise ValueError(f'Unsupported postgraduate delivery type: {delivery}')
+    return prefix + suffix
 
 
 def pg_delivery_combinations(text):
@@ -116,12 +124,22 @@ def pg_delivery_combinations(text):
         return {}
     block = ' '.join(before[marker:].split())
     combos = {}
-    pattern = re.compile(r'\b(Full|Part)\s+Time\s+(On\s+Campus|Online)(?:\s*\((RGU|MDIS)\))?', re.I)
+    pattern = re.compile(
+        r'\b(Full|Part)[- ]+Time\s+'
+        r'(On[- ]+Campus|Online|Work[- ]+Based(?:\s+Learning)?)(?:\s*\((RGU|MDIS)\))?',
+        re.I,
+    )
     for m in pattern.finditer(block):
         if (m.group(3) or '').upper() == 'MDIS':
             continue
         mode = 'Full-Time' if m.group(1).lower() == 'full' else 'Part-Time'
-        delivery = 'Online' if m.group(2).lower().startswith('online') else 'On-Campus'
+        raw_delivery = re.sub(r'[-\s]+', ' ', m.group(2).lower()).strip()
+        if raw_delivery.startswith('online'):
+            delivery = 'Online'
+        elif raw_delivery.startswith('work based'):
+            delivery = 'Work-Based'
+        else:
+            delivery = 'On-Campus'
         ident = pg_delivery_id(mode, delivery)
         combos.setdefault(ident, {'mode': mode, 'delivery': delivery})
     return combos
@@ -155,8 +173,10 @@ def pg_row_context(lines, row_index, code_column):
     delivery = None
     if re.search(r'\bOnline\b', local, re.I):
         delivery = 'Online'
-    elif re.search(r'\bOn\s+Campus\b', local, re.I):
+    elif re.search(r'\bOn[- ]+Campus\b', local, re.I):
         delivery = 'On-Campus'
+    elif re.search(r'\bWork[- ]+Based(?:\s+Learning)?\b', local, re.I):
+        delivery = 'Work-Based'
     site = 'MDIS' if re.search(r'\(MDIS\)', local, re.I) else 'RGU' if re.search(r'\(RGU\)', local, re.I) else None
     return mode, delivery, site
 
@@ -577,7 +597,10 @@ def parse(text, filename):
     if pg and flexible_intake:
         warnings.append('The CAD states that intakes are available throughout the year; the published flexible module structure is shown rather than a September/January sequence.')
     elif pg and not routes:
-        warnings.append('No September/January intake sequence is published; the CAD semester structure is shown as supplied.')
+        if re.search(r'18 months with a September intake.*18 months with a February intake', flat, re.I | re.S):
+            warnings.append('The CAD states a September main intake and a possible February intake, but does not publish separate intake-specific module sequences; the four-semester Delivery Range is shown as supplied.')
+        else:
+            warnings.append('No intake-specific module sequence is published; the CAD semester structure is shown as supplied.')
     if pg and re.search(r'The course structure \(Delivery Range\) is for new students', text, re.I):
         warnings.append('The diagram uses the current Delivery Range for new students; transitional arrangements for earlier cohorts are not shown.')
 

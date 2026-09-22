@@ -10,7 +10,11 @@ spec.loader.exec_module(bg)
 
 
 def pg_pdf(code):
-    return next((ROOT / 'course-pdfs').glob(f'Course  {code} - MSc*.pdf'), None)
+    for path in sorted((ROOT / 'course-pdfs').glob(f'Course  {code} -*.pdf')):
+        text = bg.extract(path)
+        if re.search(r'Course Type\s+Postgraduate', text):
+            return path
+    return None
 
 
 class PostgraduateRouteTests(unittest.TestCase):
@@ -30,7 +34,10 @@ class PostgraduateRouteTests(unittest.TestCase):
             text = bg.extract(path)
             if not re.search(r'Course Type\s+Postgraduate', text):
                 continue
-            course = bg.parse(text, path.name)
+            try:
+                course = bg.parse(text, path.name)
+            except Exception as exc:
+                self.fail(f'{path.name}: {exc}')
             self.assertTrue(course['allocationVerified'], path.name)
             self.assertTrue(course['creditTotalChecked'], path.name)
             self.assertTrue(course['pgDeliveryCombinations'], path.name)
@@ -38,6 +45,22 @@ class PostgraduateRouteTests(unittest.TestCase):
         # The PDFs in course-pdfs are the source of truth. Courses may be
         # intentionally removed without requiring the test suite to be edited.
         self.assertTrue(courses, 'No postgraduate CADs were found')
+
+
+    def test_ga_msc_work_based_delivery_is_supported(self):
+        course = self.parse_code('0636')
+        self.assertEqual(
+            {'FULL_WORK_BASED': {'mode': 'Full-Time', 'delivery': 'Work-Based'}},
+            course['pgDeliveryCombinations'],
+        )
+        self.assertEqual([1, 2, 3, 4], sorted({m['semester'] for m in course['modules']}))
+        self.assertEqual(180, sum(
+            m['credits'] for m in course['modules']
+            if not m['additional'] and not m.get('excludedFromAward')
+        ))
+        self.assertTrue(course['allocationVerified'])
+        self.assertTrue(course['creditTotalChecked'])
+        self.assertTrue(any('possible February intake' in warning for warning in course['warnings']))
 
     def test_pg_credit_validation_still_blocks_a_bad_award_total(self):
         path = self.require_pg_pdf('0558')
