@@ -758,15 +758,21 @@ def build(source, out):
 
     # Keep the published application and its generated data in one atomic HTML
     # response. GitHub Pages/browser caches can otherwise mix versions of
-    # index.html, app.js and gallery-data.js after a deployment.
+    # index.html, app.js and gallery-data.js after a deployment. The generated
+    # data may live in <head>, but the application must execute after the page
+    # controls have been parsed.
     index_path = out / 'index.html'
     index = index_path.read_text()
-    script_tags = '  <script src=\"gallery-data.js\" defer></script>\n  <script src=\"app.js\" defer></script>'
+    script_tags = '  <script src="gallery-data.js" defer></script>\n  <script src="app.js" defer></script>'
     if script_tags not in index:
         raise ValueError('Website script tags not found; cannot create atomic published page.')
     app_script = (out / 'app.js').read_text().replace('</script', '<\\/script')
-    inline = '  <script>\n' + data_script + '  </script>\n  <script>\n' + app_script + '\n  </script>'
-    index_path.write_text(index.replace(script_tags, inline))
+    data_inline = '  <script>\n' + data_script + '  </script>'
+    index = index.replace(script_tags, data_inline)
+    app_inline = '  <script>\n' + app_script + '\n  </script>\n'
+    if '</body>' not in index:
+        raise ValueError('Website body closing tag not found; cannot place application script safely.')
+    index_path.write_text(index.replace('</body>', app_inline + '</body>'))
 
     # Stable external copies remain in dist only so a previously cached index
     # can still load a matching current pair during the cache transition.

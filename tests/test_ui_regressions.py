@@ -31,7 +31,8 @@ class UIRegressionTests(unittest.TestCase):
         builder = (ROOT / 'scripts' / 'build_gallery.py').read_text(encoding='utf8')
         html = (ROOT / 'web' / 'index.html').read_text(encoding='utf8')
         self.assertIn("data_script = 'window.COURSE_GALLERY='", builder)
-        self.assertIn("index_path.write_text(index.replace(script_tags, inline))", builder)
+        self.assertIn("index = index.replace(script_tags, data_inline)", builder)
+        self.assertIn("index.replace('</body>', app_inline + '</body>')", builder)
         # A stale pre-PG app.js looked this element up unconditionally. Keeping a
         # hidden compatibility target prevents a mixed-cache transition from
         # crashing the page while the new atomic index propagates.
