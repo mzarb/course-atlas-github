@@ -1,1 +1,1 @@
-{"name":"course-atlas","version":"4.0.1","private":true,"scripts":{"build":"python3 scripts/build_gallery.py","test":"python3 -m unittest discover -s tests -v"}}
+{"name":"course-atlas","version":"4.0.2","private":true,"scripts":{"build":"python3 scripts/build_gallery.py","test":"python3 -m unittest discover -s tests -v"}}
