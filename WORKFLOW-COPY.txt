@@ -22,6 +22,18 @@ jobs:
         run: python3 scripts/build_gallery.py
       - name: Check browser script
         run: node --check web/app.js
+      - name: Check atomic published page
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          page = Path('dist/index.html').read_text()
+          assert 'window.COURSE_GALLERY=' in page
+          assert 'const data = window.COURSE_GALLERY;' in page
+          assert '<script src="gallery-data.js"' not in page
+          assert '<script src="app.js"' not in page
+          assert 'id="timelines" hidden' in page
+          print('Atomic gallery smoke check passed')
+          PY
       - name: Include extraction report
         if: always()
         run: |

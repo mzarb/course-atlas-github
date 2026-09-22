@@ -753,7 +753,23 @@ def build(source, out):
         for m in c['modules']:
             m.pop('groupSource', None)
     data = {'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'courses': courses}
-    (out / 'gallery-data.js').write_text('window.COURSE_GALLERY=' + json.dumps(data, ensure_ascii=True).replace('</', '<\\/') + ';\n')
+    data_script = 'window.COURSE_GALLERY=' + json.dumps(data, ensure_ascii=True).replace('</', '<\\/') + ';\n'
+    (out / 'gallery-data.js').write_text(data_script)
+
+    # Keep the published application and its generated data in one atomic HTML
+    # response. GitHub Pages/browser caches can otherwise mix versions of
+    # index.html, app.js and gallery-data.js after a deployment.
+    index_path = out / 'index.html'
+    index = index_path.read_text()
+    script_tags = '  <script src=\"gallery-data.js\" defer></script>\n  <script src=\"app.js\" defer></script>'
+    if script_tags not in index:
+        raise ValueError('Website script tags not found; cannot create atomic published page.')
+    app_script = (out / 'app.js').read_text().replace('</script', '<\\/script')
+    inline = '  <script>\n' + data_script + '  </script>\n  <script>\n' + app_script + '\n  </script>'
+    index_path.write_text(index.replace(script_tags, inline))
+
+    # Stable external copies remain in dist only so a previously cached index
+    # can still load a matching current pair during the cache transition.
     (out / '.nojekyll').write_text('')
     print(f'Built {len(courses)} courses; {sum(len(c["modules"]) for c in courses)} scheduled entries.')
     for c in courses:

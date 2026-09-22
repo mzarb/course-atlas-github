@@ -27,6 +27,16 @@ class UIRegressionTests(unittest.TestCase):
             APP,
         )
 
+    def test_published_page_is_atomic_and_cache_compatible(self):
+        builder = (ROOT / 'scripts' / 'build_gallery.py').read_text(encoding='utf8')
+        html = (ROOT / 'web' / 'index.html').read_text(encoding='utf8')
+        self.assertIn("data_script = 'window.COURSE_GALLERY='", builder)
+        self.assertIn("index_path.write_text(index.replace(script_tags, inline))", builder)
+        # A stale pre-PG app.js looked this element up unconditionally. Keeping a
+        # hidden compatibility target prevents a mixed-cache transition from
+        # crashing the page while the new atomic index propagates.
+        self.assertIn('id="timelines" hidden', html)
+
 
 if __name__ == '__main__':
     unittest.main()

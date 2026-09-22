@@ -68,6 +68,8 @@ python3 scripts/build_gallery.py
 node --check web/app.js
 ```
 
+The published `dist/index.html` embeds the generated course data and application script together, preventing browser/GitHub Pages cache mismatches between releases. Stable external script copies remain only for compatibility with an already-cached older page.
+
 The generated website is in `dist`. For a local preview, run:
 
 ```sh
