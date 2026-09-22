@@ -636,6 +636,32 @@ def group_key(code):
     return re.sub(r'\s+', '', code.upper())
 
 
+def resolve_group_members(course, module, group):
+    """Return elective choices for a course slot.
+
+    UG group deliveries are tied to the stage/semester recorded in the group
+    definition. PG course CADs can schedule the same exact elective group in
+    different programme semesters for different modes/intakes (for example,
+    FT Semester 1 versus PT Semester 3). In that case the group code, not the
+    canonical semester printed on the group PDF, defines the choice set.
+    """
+    exact = [
+        item for item in group['members']
+        if item['stage'] == module['stage'] and item['semester'] == module['semester']
+    ]
+    if exact:
+        return exact
+
+    if course.get('level') == 'PG' and group_key(group['code']) == group_key(module['code']):
+        same_stage = [item for item in group['members'] if item['stage'] == module['stage']]
+        return same_stage or list(group['members'])
+
+    if module.get('additional'):
+        return list(group['members'])
+
+    return []
+
+
 def parse_group(text, filename):
     code = re.search(r'^\s*Group Code\s+(.+)$', text, re.M)
     title = re.search(r'^\s*Group Title\s+(.+)$', text, re.M)
@@ -712,9 +738,10 @@ def build(source, out):
             if not g:
                 unresolved.append(m['code'])
                 continue
-            members = [x for x in g['members'] if x['stage'] == m['stage'] and x['semester'] == m['semester']]
-            if not members and m['additional']:
-                members = g['members']
+            members = resolve_group_members(c, m, g)
+            if members and m['additional'] and not any(
+                x['stage'] == m['stage'] and x['semester'] == m['semester'] for x in g['members']
+            ):
                 m['groupNote'] = (
                     'The course references this additional group here; the group PDF lists its choices under ' +
                     ', '.join(sorted({f"Stage {x['stage']} / Semester {x['semester']}" for x in members})) +

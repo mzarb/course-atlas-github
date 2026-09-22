@@ -88,6 +88,49 @@ class PostgraduateRouteTests(unittest.TestCase):
         # source-specific regression rather than blocking course deletion.
         self.assertTrue(self.parse_code('0329')['flexibleIntake'])
 
+    def test_pg_elective_group_can_move_between_ft_and_pt_semesters(self):
+        course = {'level': 'PG'}
+        group = {
+            'code': '0734 - Electives 1',
+            'members': [
+                {'stage': 1, 'semester': 1, 'code': 'CMM999', 'title': 'Example Option', 'credits': 15, 'page': 1},
+            ],
+        }
+        pt_slot = {'stage': 1, 'semester': 3, 'code': '0734 - Electives 1', 'additional': False}
+        self.assertEqual(group['members'], bg.resolve_group_members(course, pt_slot, group))
+
+    def test_advanced_computing_reuses_exact_groups_across_ft_pt_schedule(self):
+        course = self.parse_code('0734')
+        group1 = {
+            'code': '0734 - Electives 1',
+            'members': [
+                {'stage': 1, 'semester': 1, 'code': 'CMM999', 'title': 'Example Option 1', 'credits': 15, 'page': 1},
+            ],
+        }
+        group2 = {
+            'code': '0734 - Electives 2',
+            'members': [
+                {'stage': 1, 'semester': 2, 'code': 'CMM998', 'title': 'Example Option 2', 'credits': 15, 'page': 1},
+            ],
+        }
+        slots1 = [m for m in course['modules'] if m['code'] == '0734 - Electives 1']
+        slots2 = [m for m in course['modules'] if m['code'] == '0734 - Electives 2']
+        self.assertEqual({1, 3}, {m['semester'] for m in slots1})
+        self.assertEqual({2, 4}, {m['semester'] for m in slots2})
+        self.assertTrue(all(bg.resolve_group_members(course, m, group1) for m in slots1))
+        self.assertTrue(all(bg.resolve_group_members(course, m, group2) for m in slots2))
+
+    def test_ug_elective_group_still_requires_matching_semester(self):
+        course = {'level': 'UG'}
+        group = {
+            'code': 'PS0071 - Electives 1',
+            'members': [
+                {'stage': 1, 'semester': 1, 'code': 'CM1122', 'title': 'AI, Data and Society', 'credits': 15, 'page': 1},
+            ],
+        }
+        wrong_semester = {'stage': 1, 'semester': 2, 'code': 'PS0071 - Electives 1', 'additional': False}
+        self.assertEqual([], bg.resolve_group_members(course, wrong_semester, group))
+
 
 if __name__ == '__main__':
     unittest.main()
