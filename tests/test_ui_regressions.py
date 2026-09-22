@@ -21,6 +21,14 @@ class UIRegressionTests(unittest.TestCase):
         # visible rows on the selected course route.
         self.assertIn('new Set(mapModules.map(item => item.semester))', APP)
 
+
+    def test_course_selector_orders_ug_then_integrated_masters_then_pg(self):
+        self.assertIn("if (item.level === 'PG') return 2;", APP)
+        self.assertIn("/^(MEng|MSci)\\b/i.test(item.title)", APP)
+        self.assertIn('const sortedCourses = [...data.courses].sort', APP)
+        self.assertIn("a.title.localeCompare(b.title", APP)
+        self.assertIn('for (const item of sortedCourses)', APP)
+
     def test_removed_module_export_disclaimer_stays_removed(self):
         self.assertNotIn(
             'Module-level outcomes, assessments and prerequisites are not included in this course export.',

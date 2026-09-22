@@ -13,7 +13,18 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[character]));
 
-for (const item of data.courses) {
+const courseSortGroup = item => {
+  if (item.level === 'PG') return 2;
+  if (/^(MEng|MSci)\b/i.test(item.title)) return 1;
+  return 0;
+};
+
+const sortedCourses = [...data.courses].sort((a, b) =>
+  courseSortGroup(a) - courseSortGroup(b) ||
+  a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+);
+
+for (const item of sortedCourses) {
   const option = document.createElement('option');
   option.value = item.id;
   option.textContent = item.level + ' · ' + item.title;
