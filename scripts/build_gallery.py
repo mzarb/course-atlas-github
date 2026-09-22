@@ -14,49 +14,176 @@ def extract(path):
     return p.stdout
 
 
-def intake_routes(text):
-    clean = re.sub(r'^Course .*?·.*$|^Page \d+ of \d+\s*$', '', text, flags=re.M)
-    flat = ' '.join(clean.split())
-    result = {}
-    for mode, following in [('Full-Time', 'Part-Time'), ('Part-Time', 'Online Learning')]:
-        m = re.search(re.escape(mode) + r' Students(.*?)' + re.escape(following), flat)
-        if not m:
+def _month_year_steps(sequence):
+    steps = []
+    year = 1
+    last = 0
+    for x in re.finditer(r'Semester\s+(\d+)\s*\(([^)]+)\)', sequence, re.I):
+        detail = x.group(2)
+        month = re.search(r'(?:taken\s+in\s+)?(September|January|May)', detail, re.I)
+        if not month:
             continue
-        result[mode] = {}
-        for match in re.finditer(r'For (September|January) entry, the sequence of modules will be:\s*(.*?)(?=For (?:September|January) entry|$)', m[1]):
-            steps = []
-            year = 1
-            last = 0
-            for x in re.finditer(r'Semester (\d+)\s*\(([^)]+)\)', match[2]):
-                month = re.search(r'taken in (September|January|May)', x[2])
-                if not month:
-                    continue
-                monthnum = {'January': 1, 'May': 5, 'September': 9}[month[1]]
-                if monthnum < last:
-                    year += 1
-                last = monthnum
-                steps.append({
-                    'semester': int(x[1]), 'month': month[1], 'year': year,
-                    'project': 'project' in x[2].lower(),
-                    'spansTwoSemesters': 'spanning 2 semesters' in x[2]
-                })
+        month_name = month.group(1).title()
+        monthnum = {'January': 1, 'May': 5, 'September': 9}[month_name]
+        if monthnum < last:
+            year += 1
+        last = monthnum
+        steps.append({
+            'semester': int(x.group(1)), 'month': month_name, 'year': year,
+            'project': 'project' in detail.lower(),
+            'spansTwoSemesters': bool(re.search(r'spanning\s+2\s+semesters', detail, re.I))
+        })
+    return steps
+
+
+def intake_routes(text):
+    """Read explicit PG intake sequencing without folding neighbouring delivery blocks together."""
+    clean = re.sub(r'^Course .*?·.*$|^Page \d+ of \d+\s*$', ' ', text, flags=re.M)
+    flat = ' '.join(clean.split())
+    heading_re = re.compile(
+        r'(?P<mode>Full[- ]Time|Part[- ]Time)'
+        r'(?:\s+On-Campus\s*/\s*Part-Time\s+Online\s+Learning)?\s+Students'
+        r'(?:\s*\((?P<site>RGU|MDIS)\))?',
+        re.I,
+    )
+    matches = list(heading_re.finditer(flat))
+    result = {}
+    for index, match in enumerate(matches):
+        site = (match.group('site') or '').upper()
+        if site == 'MDIS':
+            continue
+        mode = 'Full-Time' if match.group('mode').lower().startswith('full') else 'Part-Time'
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(flat)
+        block = flat[match.end():end]
+        by_intake = result.setdefault(mode, {})
+        entry_matches = list(re.finditer(r'For\s+(September|January)\s+entry,\s+the\s+sequence\s+of\s+modules\s+will\s+be:\s*', block, re.I))
+        for j, entry in enumerate(entry_matches):
+            intake = entry.group(1).title()
+            stop = entry_matches[j + 1].start() if j + 1 < len(entry_matches) else len(block)
+            steps = _month_year_steps(block[entry.end():stop])
             if steps:
-                result[mode][match[1]] = steps
-    return {k: v for k, v in result.items() if v}
+                by_intake[intake] = steps
+    result = {mode: entries for mode, entries in result.items() if entries}
+
+    # A small number of CADs give the same standard structure and both intake
+    # durations, but omit the explicit sequence paragraph. Derive only where the
+    # document itself states all of those ingredients.
+    if not result and all(phrase in flat for phrase in (
+        'Full-time 12 months with a September intake',
+        'Full-time 16 months with a January intake',
+        'Part-time 28 months with a September intake',
+        'Part-time 32 months with a January intake',
+    )) and re.search(r'four\s+15\s+credit\s+modules\s+in\s+Semester\s+1.*four\s+15\s+credit\s+modules\s+in\s+semester\s+2', flat, re.I):
+        result = {
+            'Full-Time': {
+                'September': _month_year_steps('Semester 1 (taken in September), Semester 2 (taken in January), Semester 3 (project, taken in May)'),
+                'January': _month_year_steps('Semester 2 (taken in January), Semester 1 (taken in September), Semester 3 (project, taken in January)'),
+            },
+            'Part-Time': {
+                'September': _month_year_steps('Semester 1 (taken in September), Semester 2 (taken in January), Semester 3 (taken in September), Semester 4 (taken in January), Semester 5 (project, taken in May and spanning 2 semesters)'),
+                'January': _month_year_steps('Semester 2 (taken in January), Semester 1 (taken in September), Semester 4 (taken in January), Semester 3 (taken in September), Semester 5 (project, taken in January and spanning 2 semesters)'),
+            },
+        }
+    return result
 
 
 def extract_route_names(text):
-    """Read lettered course routes from headings, whether or not Akari ends them with full stops."""
+    """Read lettered route names using either Akari's dash or colon separator."""
     result = {}
     for line in text.splitlines():
         if 'Route ' not in line:
             continue
-        for m in re.finditer(r'Route\s+([A-Z])\s*-\s*(.*?)(?=\s+Route\s+[A-Z]\s*-|$)', line):
+        for m in re.finditer(r'Route\s+([A-Z])\s*[-:]\s*(.*?)(?=\s+Route\s+[A-Z]\s*[-:]|$)', line, re.I):
             name = m.group(2).strip().rstrip(' .;')
-            if name and len(name) < 120:
-                result.setdefault(m.group(1), name)
+            if name and len(name) < 140:
+                result.setdefault(m.group(1).upper(), name)
     return result
 
+
+def pg_delivery_id(mode, delivery):
+    return ('FULL' if mode == 'Full-Time' else 'PART') + ('_ONLINE' if delivery == 'Online' else '_CAMPUS')
+
+
+def pg_delivery_combinations(text):
+    """Read the supported RGU PG mode/attendance combinations from Delivery Range."""
+    stage = re.search(r'^\s*Stage\s+1\s*/\s*Semester\s+1\s*$', text, re.M)
+    if not stage:
+        return {}
+    before = text[:stage.start()]
+    marker = before.rfind('Delivery Range')
+    if marker < 0:
+        return {}
+    block = ' '.join(before[marker:].split())
+    combos = {}
+    pattern = re.compile(r'\b(Full|Part)\s+Time\s+(On\s+Campus|Online)(?:\s*\((RGU|MDIS)\))?', re.I)
+    for m in pattern.finditer(block):
+        if (m.group(3) or '').upper() == 'MDIS':
+            continue
+        mode = 'Full-Time' if m.group(1).lower() == 'full' else 'Part-Time'
+        delivery = 'Online' if m.group(2).lower().startswith('online') else 'On-Campus'
+        ident = pg_delivery_id(mode, delivery)
+        combos.setdefault(ident, {'mode': mode, 'delivery': delivery})
+    return combos
+
+
+def pg_row_context(lines, row_index, code_column):
+    """Recover the wrapped PG Delivery Range cell for one module row."""
+    # Mode labels normally start before the code row. Search backwards only as
+    # far as the previous module row so a neighbouring delivery cannot leak in.
+    mode = None
+    for j in range(row_index, max(-1, row_index - 12), -1):
+        if j != row_index and CODE_RE.search(lines[j].replace('\f', '')):
+            break
+        prefix = lines[j].replace('\f', '')[:code_column]
+        matches = list(re.finditer(r'\b(Full|Part)\b', prefix, re.I))
+        if matches:
+            mode = 'Full-Time' if matches[-1].group(1).lower() == 'full' else 'Part-Time'
+            break
+
+    # Attendance is usually completed on one or two lines after the code row.
+    pieces = []
+    for j in range(row_index, min(len(lines), row_index + 16)):
+        if j != row_index and CODE_RE.search(lines[j].replace('\f', '')):
+            break
+        prefix = lines[j].replace('\f', '')[:code_column].strip()
+        if re.match(r'^(?:Course\s+\d+|Page\s+\d+)', prefix):
+            continue
+        if prefix:
+            pieces.append(prefix)
+    local = ' '.join(pieces)
+    delivery = None
+    if re.search(r'\bOnline\b', local, re.I):
+        delivery = 'Online'
+    elif re.search(r'\bOn\s+Campus\b', local, re.I):
+        delivery = 'On-Campus'
+    site = 'MDIS' if re.search(r'\(MDIS\)', local, re.I) else 'RGU' if re.search(r'\(RGU\)', local, re.I) else None
+    return mode, delivery, site
+
+
+def placement_kind(name):
+    value = re.sub(r'[-–—]', ' ', name).lower()
+    value = re.sub(r'\s+', ' ', value)
+    if 'short placement' in value:
+        return 'short'
+    if 'long placement' in value or 'year long' in value:
+        return 'long'
+    if 'non placement' in value or 'no placement' in value:
+        return 'none'
+    return None
+
+
+def pg_pathway_label(route_name):
+    """Strip placement suffixes so route triplets collapse to one PG pathway."""
+    kind = placement_kind(route_name)
+    if kind is None:
+        return route_name.strip().rstrip(' .:;,')
+    label = re.sub(r'(?i)[,:]?\s*(?:non[- ]?placement|no\s+placement|short\s+placement|long\s+placement)\s*$', '', route_name).strip(' ,:;-')
+    return label
+
+
+def pathway_id(label):
+    slug = re.sub(r'[^A-Z0-9]+', '_', label.upper()).strip('_')
+    return slug or 'GENERAL'
 
 def table_columns(line):
     """Return character starts for the Akari delivery-table columns."""
@@ -140,6 +267,8 @@ def parse(text, filename):
         raise ValueError('Course code, title or export date not recognised')
     code, title, date = head.groups()
     pg = bool(re.search(r'Course Type\s+Postgraduate', text))
+    if code == '0573':
+        title = re.sub(r'\s*\(RGU and MDIS\)\s*$', '', title).strip()
     credit = re.search(r'SCQF Credit Points\s+(\d+)', text)
     if not credit:
         raise ValueError('Award credit total not found')
@@ -206,22 +335,41 @@ def parse(text, filename):
             name = cell_fragments(lines, i, max(columns['code'] + 1, title_start - 4), title_end, radius=1)
         if not name:
             raise ValueError('Empty module title for ' + c)
+        name = re.sub(r'\s*\[Approved\]\s*$', '', name, flags=re.I).strip()
 
-        route_segments = [x for x in segments if re.match(r'^Routes?\s+[A-Z](?:\s*,\s*[A-Z])*$', x)]
+        route_segments = [x for x in segments if re.match(r'^Routes?\s+[A-Z](?:\s*,\s*[A-Z])*[.]?$', x)]
         notes = ' '.join(route_segments)
-        if columns and not notes:
+        if columns:
             note_start = columns.get('notes')
             if note_start is not None:
                 note_end = min((columns[k] for k in ('owner', 'allow', 'version', 'credits', 'module') if k in columns and columns[k] > note_start), default=None)
-                notes = cell_fragments(lines, i, note_start, note_end, radius=1)
-            else:
-                notes = ''
+                table_notes = cell_fragments(lines, i, note_start, note_end, radius=1)
+                if table_notes and table_notes not in notes:
+                    notes = (notes + ' ' + table_notes).strip()
+
+        pg_contexts = []
+        if pg and columns:
+            pg_mode, pg_delivery, pg_site = pg_row_context(lines, i, match.start())
+            # Business Analytics contains a parallel MDIS schedule. The public
+            # atlas intentionally keeps only the RGU delivery requested here.
+            if pg_site == 'MDIS':
+                continue
+            if pg_mode and pg_delivery:
+                pg_contexts = [pg_delivery_id(pg_mode, pg_delivery)]
 
         credits = CREDIT_RE.search(line)
         value = int(credits[1]) if credits else None
         group = 'electives' in c.lower()
-        row_routes = parse_route_ids(notes)
+        row_routes = parse_route_ids(after + ' ' + notes)
         local = ' '.join(x.strip() for x in lines[max(0, i - 2):min(len(lines), i + 3)])
+        row_intakes = sorted(set(
+            (['September'] if re.search(r'September\s+Intake', line + ' ' + notes, re.I) else []) +
+            (['January'] if re.search(r'January\s+Intake', line + ' ' + notes, re.I) else [])
+        ))
+        pg_variants = [
+            {'deliveryId': ident, 'routeIds': list(row_routes), 'intakeIds': list(row_intakes)}
+            for ident in pg_contexts
+        ]
         item = {
             'stage': current[0], 'semester': current[1], 'code': c, 'title': name,
             'credits': value, 'type': 'elective' if group else kind, 'page': page,
@@ -229,6 +377,9 @@ def parse(text, filename):
             'deliveryIds': [],
             '_deliveryHints': delivery_ids_near(lines, i, match.start()) if columns else [],
             '_noteDeliveryIds': note_delivery_ids(notes),
+            '_pgContexts': pg_contexts,
+            '_pgVariants': pg_variants,
+            'intakeIds': row_intakes,
             'spansSemesters': 2 if re.search(r'Undertaken over two semesters', local, re.I) else 1
         }
 
@@ -240,6 +391,12 @@ def parse(text, filename):
             old['routeIds'] = sorted(set(old['routeIds']) | set(row_routes))
             old['_deliveryHints'] = sorted(set(old['_deliveryHints']) | set(item['_deliveryHints']))
             old['_noteDeliveryIds'] = sorted(set(old['_noteDeliveryIds']) | set(item['_noteDeliveryIds']))
+            old['_pgContexts'] = sorted(set(old.get('_pgContexts', [])) | set(item.get('_pgContexts', [])))
+            for variant in item.get('_pgVariants', []):
+                if variant not in old.setdefault('_pgVariants', []):
+                    old['_pgVariants'].append(variant)
+            old['intakeIds'] = sorted(set(old.get('intakeIds', [])) | set(item.get('intakeIds', [])))
+            old['spansSemesters'] = max(old.get('spansSemesters', 1), item.get('spansSemesters', 1))
             duplicates += 1
             continue
         seen[key] = len(modules)
@@ -270,17 +427,67 @@ def parse(text, filename):
         or re.search(r'credits achieved for (?:placement|study abroad)[^.]{0,180}\bin addition to\b', flat_lower)
     )
     for m in modules:
-        if placement_is_additional and m['semester'] == 3 and m['type'] == 'elective' and (m['credits'] or 0) >= 90:
+        is_pg_placement = bool(
+            pg and (m['code'] in {'CEM104', 'CEM105'} or re.search(r'Postgraduate\s+Placement', m['title'], re.I))
+        )
+        if is_pg_placement:
+            m['placementOption'] = True
+            if placement_is_additional:
+                m['additional'] = True
+        elif placement_is_additional and m['semester'] == 3 and m['type'] == 'elective' and (m['credits'] or 0) >= 90:
             m['additional'] = True
         if re.search(r'\b' + re.escape(m['code']) + r'\s+[^.]*?is for additional credit only\.', flat, re.I):
             m['additional'] = True
 
     route_names = extract_route_names(text)
     used_routes = sorted({r for m in modules for r in m['routeIds']})
-    pathways = {r: route_names[r].strip() for r in used_routes if r in route_names}
-    missing_route_names = [r for r in used_routes if r not in pathways]
+    raw_pathways = {r: route_names[r].strip() for r in used_routes if r in route_names}
+    missing_route_names = [r for r in used_routes if r not in raw_pathways]
     if missing_route_names:
         raise ValueError('Route names not found for: ' + ', '.join(missing_route_names))
+
+    pathways = dict(raw_pathways)
+    if pg:
+        # PG CADs frequently multiply a real subject pathway by three placement
+        # variants. Collapse those route letters to the meaningful pathway while
+        # keeping placement as an optional, additional-credit module.
+        route_to_label = {r: pg_pathway_label(name) for r, name in route_names.items()}
+        meaningful_labels = sorted({route_to_label[r] for r in used_routes if route_to_label.get(r)})
+        if len(meaningful_labels) > 1:
+            pathways = {pathway_id(label): label for label in meaningful_labels}
+            route_to_path = {
+                r: pathway_id(label) for r, label in route_to_label.items()
+                if label and pathway_id(label) in pathways
+            }
+            all_paths = set(pathways)
+            # Route notes on some PT rows use inconsistent letter pairs even though
+            # the same module is unambiguous in the FT table. Canonicalise subject
+            # pathway membership by module code, preferring the FT occurrence when
+            # the CAD provides one, then reuse it for the PT occurrence.
+            full_routes_by_code = {}
+            any_routes_by_code = {}
+            for item in modules:
+                for variant in item.get('_pgVariants', []):
+                    any_routes_by_code.setdefault(item['code'], set()).update(variant.get('routeIds', []))
+                    if str(variant.get('deliveryId', '')).startswith('FULL_'):
+                        full_routes_by_code.setdefault(item['code'], set()).update(variant.get('routeIds', []))
+            for m in modules:
+                # Projects and placements are programme-wide. A few CAD route
+                # notes omit one pathway on one occurrence, while another
+                # occurrence confirms the shared module; treating these as common
+                # also matches the declared 180-credit award structure.
+                is_project = bool((m.get('credits') or 0) >= 60 and re.search(r'Project', m['title'], re.I))
+                if m.get('placementOption') or is_project:
+                    m['pathwayIds'] = []
+                    continue
+                candidate_routes = sorted(full_routes_by_code.get(m['code']) or any_routes_by_code.get(m['code'], set()))
+                pids = sorted({route_to_path[r] for r in candidate_routes if r in route_to_path})
+                m['pathwayIds'] = [] if not pids or set(pids) == all_paths else pids
+        else:
+            # Generic Non-/Short-/Long-Placement triplets are not pathways.
+            pathways = {}
+            for m in modules:
+                m['pathwayIds'] = []
 
     # Engineering integrated masters expose two delivery routes. The PDFs describe
     # Fast Track as completing Stage 5 through the summer periods after Stages 3
@@ -324,14 +531,24 @@ def parse(text, filename):
                 )
 
     known = all(m['credits'] is not None for m in modules)
+    routes = intake_routes(text) if pg else {}
+    pg_deliveries = pg_delivery_combinations(text) if pg else {}
+    flexible_intake = bool(pg and re.search(r'intakes?\s+available\s+throughout\s+the\s+year', flat, re.I))
+
     if not known:
         warnings.append('Individual module/group credits are not included in this export. They have not been inferred.')
-    if pg:
-        warnings.append('This export does not identify the full-time/part-time allocation of each schedule row. Intake sequences are confirmed from the narrative; the module lists are a combined source schedule, not a verified route timetable.')
     if any(m['type'] == 'elective' for m in modules):
         warnings.append('Elective groups are shown as slots. Their individual choices are not included in this course PDF.')
     if 'CM1112' in text and any(m['code'] == 'CE1337' for m in modules):
         warnings.append('The delivery table lists CE1337 Programming Bootcamp; a narrative note still refers to CM1112 Introduction to Programming. The diagram follows the table.')
+    if pg and code == '0573':
+        warnings.append('The MDIS delivery in the CAD is omitted; this atlas shows RGU delivery only.')
+    if pg and flexible_intake:
+        warnings.append('The CAD states that intakes are available throughout the year; the published flexible module structure is shown rather than a September/January sequence.')
+    elif pg and not routes:
+        warnings.append('No September/January intake sequence is published; the CAD semester structure is shown as supplied.')
+    if pg and re.search(r'The course structure \(Delivery Range\) is for new students', text, re.I):
+        warnings.append('The diagram uses the current Delivery Range for new students; transitional arrangements for earlier cohorts are not shown.')
 
     if known and not pg:
         route_checks = list(pathways) or [None]
@@ -357,21 +574,61 @@ def parse(text, filename):
                         'Review delivery variants or optional modules before publishing.'
                     )
 
+    if pg and known:
+        if not pg_deliveries:
+            raise ValueError('No postgraduate study mode/delivery combinations were recognised from Delivery Range.')
+
+        # Validate every displayable PG combination independently. Placements are
+        # deliberately excluded only when the CAD explicitly states that their
+        # credits are additional to the 180-credit award.
+        for delivery_id, delivery_meta in pg_deliveries.items():
+            mode = delivery_meta['mode']
+            intake_checks = list(routes.get(mode, {})) or [None]
+            pathway_checks = list(pathways) or [None]
+            for intake in intake_checks:
+                for pathway in pathway_checks:
+                    included = []
+                    for m in modules:
+                        if m['additional'] or m.get('excludedFromAward'):
+                            continue
+                        variants = [v for v in m.get('_pgVariants', []) if v.get('deliveryId') == delivery_id]
+                        if not variants:
+                            continue
+                        if intake and not any(not v.get('intakeIds') or intake in v.get('intakeIds', []) for v in variants):
+                            continue
+                        if pathway and m.get('pathwayIds') and pathway not in m['pathwayIds']:
+                            continue
+                        included.append(m)
+                    total = sum(m['credits'] for m in included)
+                    if total != int(credit[1]):
+                        labels = [mode, delivery_meta['delivery']]
+                        if intake:
+                            labels.append(intake + ' intake')
+                        if pathway:
+                            labels.append(pathways[pathway])
+                        raise ValueError(
+                            f'Listed postgraduate award credits ({total}) do not match declared award credits ({credit[1]}) '
+                            f"for {' / '.join(labels)}. Review PG delivery, intake or pathway allocation before publishing."
+                        )
+
     for m in modules:
         m.pop('_deliveryHints', None)
         m.pop('_noteDeliveryIds', None)
-
-    routes = intake_routes(text) if pg else {}
-    if pg and not routes:
-        warnings.append('No intake sequences were recognised. Only the published semester schedule is shown.')
+        if pg:
+            m['pgVariants'] = m.pop('_pgVariants', [])
+            m.pop('_pgContexts', None)
 
     return {
         'id': code, 'title': title, 'level': 'PG' if pg else 'UG',
         'awardCredits': int(credit[1]), 'sourceDate': date.strip(), 'sourceFile': filename,
         'modules': modules, 'routes': routes, 'pathways': pathways,
-        'deliveryPathways': delivery_pathways, 'warnings': warnings,
-        'duplicatesCollapsed': duplicates, 'allocationVerified': not pg,
-        'creditTotalChecked': known and not pg
+        'deliveryPathways': delivery_pathways,
+        'pgDeliveryCombinations': pg_deliveries,
+        'flexibleIntake': flexible_intake,
+        'warnings': warnings,
+        'duplicatesCollapsed': duplicates,
+        'allocationVerified': (not pg) or (known and bool(pg_deliveries)),
+        'creditTotalChecked': known and ((not pg) or bool(pg_deliveries))
     }
 
 
@@ -435,6 +692,8 @@ def build(source, out):
                 groups[key] = g
                 continue
             c = parse(text, p.name)
+            if c['level'] == 'PG' and (not c.get('creditTotalChecked') or not c.get('allocationVerified')):
+                raise ValueError('Postgraduate course is not publishable until delivery allocation and award-credit validation both pass.')
             c['sha256'] = hashlib.sha256(p.read_bytes()).hexdigest()
             c['_path'] = p
             courses.append(c)

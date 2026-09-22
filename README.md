@@ -26,6 +26,11 @@ The PDFs are build inputs only. The generated `dist` site does **not** copy them
 - A Semester 3 column is only created when the selected route actually contains a Semester 3 row.
 - Elective group PDFs are expanded as **Choose one from** choices.
 - MSci lettered routes are retained and independently credit-validated.
+- Postgraduate courses are intake-aware: the selected September/January intake reorders the CAD semesters into the sequence actually published for that intake.
+- Postgraduate Full-Time/Part-Time and On-Campus/Online delivery combinations are read from the CAD rather than inferred from course duration.
+- PG subject pathways are shown separately from placement variants. Short and year-long postgraduate placements appear as optional module cards instead of top-level course routes.
+- PG courses with intakes throughout the year are shown as a flexible sequence rather than being forced into September/January.
+- The MDIS delivery embedded in MSc Business Analytics is intentionally omitted; Course Atlas shows the RGU delivery only.
 - Engineering BEng additional placement/study-abroad options are retained but excluded from the award total only where the CAD explicitly states they are additional credits.
 - Engineering MEng **Fast Track** and **Five Year** routes are reconstructed from the route structure documented in the CAD and independently credit-validated. Courses that also have lettered specialisms validate every delivery-route/specialism combination.
 - Click a module or elective group to inspect its details and choices. The public gallery does not link back to the source PDFs.
@@ -39,7 +44,7 @@ The supplied MEng Engineering Design CAD contains one internally contradictory r
 
 ## Validation
 
-Validation is deliberately blocking. A build fails for an unreadable file, no recognised schedule, conflicting duplicate row, duplicate course code, missing route name, unresolved elective group mapping, or an inconsistent undergraduate award-credit total.
+Validation is deliberately blocking. A build fails for an unreadable file, no recognised schedule, conflicting duplicate row, duplicate course code, missing route name, an invalid supplied elective-group mapping, or an inconsistent award-credit total. If an elective-group PDF has not been supplied at all, the credit-bearing slot remains visible and is explicitly flagged as unexpanded rather than inventing its choices.
 
 For routes, the checks are performed independently:
 
@@ -49,7 +54,9 @@ For routes, the checks are performed independently:
 
 Additional-credit options are excluded only when the source text explicitly identifies them as outside the award total. A flagged source-data contradiction is handled explicitly and does not switch credit checking off. The build emits `validation-report.json` with warnings and errors.
 
-Postgraduate CADs that do not identify module-by-module full-time/part-time allocation are shown as combined source schedules. The importer does not invent missing allocations or credits.
+Postgraduate validation is also blocking. Each published Full-Time/Part-Time + On-Campus/Online combination is validated against the declared MSc award credits. Where September/January intake-specific rows exist, both intakes are checked independently; where genuine subject pathways exist, every pathway is checked too. Placement modules are excluded from the 180-credit total only because these CADs explicitly state that their credits are additional. Missing PG delivery allocation or missing module credits prevents publication.
+
+Some CADs repeat pathway route letters inconsistently in later part-time rows. Course Atlas preserves the row-level delivery/intake data, but canonicalises a module's subject-pathway membership from its unambiguous full-time occurrence of the same module code where available. This is still subject to the independent 180-credit validation for every displayed PG combination.
 
 ## Local use / development
 

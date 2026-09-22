@@ -32,21 +32,23 @@
   </section>
 
   <section id="pg-controls" hidden aria-label="Postgraduate views">
-    <div class="control-row">
+    <div class="control-row pg-control-row">
       <div><span class="control-label">Study mode</span><div id="modes" class="segmented" role="group" aria-label="Study mode"></div></div>
-      <div><span class="control-label">Intake</span><div id="intakes" class="segmented" role="group" aria-label="Intake"></div></div>
+      <div id="delivery-wrap"><span class="control-label">Delivery</span><div id="pg-deliveries" class="segmented" role="group" aria-label="Delivery"></div></div>
+      <div id="intake-wrap"><span class="control-label">Intake</span><div id="intakes" class="segmented" role="group" aria-label="Intake"></div></div>
+      <div id="pg-pathway-wrap"></div>
     </div>
-    <div class="notice"><strong>Intake order confirmed · Module allocation needs review</strong><p>The PDF specifies the sequences below, but does not label which module rows belong to full-time or part-time study. The combined module schedule is shown separately.</p></div>
-    <div id="timelines" class="timelines"></div>
-    <p class="timeline-note">Offsets are measured from the start of each intake. Gaps between blocks do not imply scheduled teaching or a confirmed vacation.</p>
+    <p id="pg-context" class="pg-context"></p>
   </section>
+
+  <section id="pathway-controls" class="control-row pathway-controls" hidden aria-label="Course route controls"></section>
 
   <div class="map-heading">
     <p class="eyebrow" id="map-kicker">COURSE STRUCTURE</p>
     <div class="legend">
       <span><i class="core"></i>Core</span>
       <span><i class="elective"></i>Elective group</span>
-      <span><i class="additional"></i>Additional option</span>
+      <span><i class="additional"></i>Optional / additional</span>
     </div>
   </div>
   <div id="map" class="map"></div>

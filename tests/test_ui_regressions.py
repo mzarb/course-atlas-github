@@ -30,3 +30,17 @@ class UIRegressionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class PGUIRegressionTests(unittest.TestCase):
+    def test_pg_ui_uses_verified_structure_not_combined_schedule_warning(self):
+        app = (ROOT / 'web' / 'app.js').read_text()
+        html = (ROOT / 'web' / 'index.html').read_text()
+        self.assertNotIn('COMBINED SOURCE SCHEDULE', app)
+        self.assertNotIn('Module allocation needs review', html)
+        self.assertIn('pgDeliveryCombinations', app)
+        self.assertIn('course.routes', app)
+
+    def test_pg_has_mode_delivery_intake_and_pathway_controls(self):
+        html = (ROOT / 'web' / 'index.html').read_text()
+        for element_id in ('modes', 'pg-deliveries', 'intakes', 'pg-pathway-wrap'):
+            self.assertIn(f'id="{element_id}"', html)
