@@ -29,6 +29,20 @@ class UIRegressionTests(unittest.TestCase):
         self.assertIn("a.title.localeCompare(b.title", APP)
         self.assertIn('for (const item of sortedCourses)', APP)
 
+    def test_placement_elective_groups_are_labelled_optional_placement(self):
+        self.assertIn('const isPlacementElectiveGroup = item =>', APP)
+        self.assertIn("['CEM104', 'CEM105']", APP)
+        self.assertIn("/\\bplacement\\b/i.test", APP)
+        self.assertIn("return 'Optional Placement';", APP)
+        self.assertIn('esc(displayTitle(item))', APP)
+        self.assertIn("$('detail-title').textContent = displayTitle(item);", APP)
+
+    def test_numbered_elective_group_titles_are_simplified(self):
+        self.assertIn('const electiveGroupDisplayTitle = title =>', APP)
+        self.assertIn('Electives?\\s+Group\\s+\\d+', APP)
+        self.assertIn("' - Electives'", APP)
+        self.assertIn("if (item.type === 'elective') return electiveGroupDisplayTitle(item.title);", APP)
+
     def test_removed_module_export_disclaimer_stays_removed(self):
         self.assertNotIn(
             'Module-level outcomes, assessments and prerequisites are not included in this course export.',

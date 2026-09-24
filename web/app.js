@@ -19,6 +19,24 @@ const courseSortGroup = item => {
   return 0;
 };
 
+const isPlacementElectiveGroup = item =>
+  item.type === 'elective' &&
+  Array.isArray(item.choices) &&
+  item.choices.some(choice =>
+    ['CEM104', 'CEM105'].includes(String(choice.code || '').toUpperCase()) ||
+    /\bplacement\b/i.test(String(choice.title || ''))
+  );
+
+const electiveGroupDisplayTitle = title =>
+  String(title || '').replace(/\s+[-–—]\s+Electives?\s+Group\s+\d+\s*$/i, ' - Electives');
+
+const displayTitle = item => {
+  if (isPlacementElectiveGroup(item)) return 'Optional Placement';
+  if (item.type === 'elective') return electiveGroupDisplayTitle(item.title);
+  return item.title;
+};
+
+
 const sortedCourses = [...data.courses].sort((a, b) =>
   courseSortGroup(a) - courseSortGroup(b) ||
   a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
@@ -228,13 +246,14 @@ function selectCourse(id) {
 function card(item) {
   const element = document.createElement('button');
   element.type = 'button';
+  const placementGroup = isPlacementElectiveGroup(item);
   const kind = item.sourceConflict ? 'conflict' : item.additional ? 'additional' : item.type;
   element.className = 'card ' + kind;
   let creditText = item.credits === null ? 'Credits not listed' : item.credits + ' credits';
-  if (item.placementOption) creditText += ' · Optional placement';
+  if (item.placementOption || placementGroup) creditText += ' · Optional placement';
   else if (item.additional) creditText += ' · Additional option';
   const statusText = item.sourceConflict ? ' · Source conflict' : item.additional && !item.placementOption ? ' · Outside award' : '';
-  element.innerHTML = `<span class="code">${esc(item.code)}</span><span class="name">${esc(item.title)}</span><span class="card-bottom"><span>${creditText}${statusText}</span><span aria-hidden="true">›</span></span>`;
+  element.innerHTML = `<span class="code">${esc(item.code)}</span><span class="name">${esc(displayTitle(item))}</span><span class="card-bottom"><span>${creditText}${statusText}</span><span aria-hidden="true">›</span></span>`;
 
   if (item.choices) {
     element.title = 'Choose one from: ' + item.choices.map(choice => choice.code + ' — ' + choice.title).join('; ');
@@ -374,17 +393,18 @@ function renderMap() {
 }
 
 function showModule(item) {
+  const placementGroup = isPlacementElectiveGroup(item);
   $('detail-kind').textContent = item.sourceConflict
     ? 'Source conflict'
-    : item.placementOption
+    : item.placementOption || placementGroup
       ? 'Optional placement'
       : item.additional
         ? 'Additional option'
         : item.type === 'elective' ? 'Elective group' : 'Module';
   $('detail-code').textContent = item.code;
-  $('detail-title').textContent = item.title;
+  $('detail-title').textContent = displayTitle(item);
 
-  let explanation = item.type === 'elective' && !item.placementOption
+  let explanation = item.type === 'elective' && !item.placementOption && !placementGroup
     ? 'This course document identifies an elective group.'
     : '';
   if (item.sourceConflict) {
