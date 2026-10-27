@@ -40,3 +40,11 @@
 
 .map.pg>.pg-stage.flexible{grid-template-columns:135px 380px;min-width:0;width:max-content}.map.pg>.pg-stage.flexible .semester{width:380px}
 @media(max-width:650px){.map.pg>.pg-stage.flexible{grid-template-columns:110px 320px}.map.pg>.pg-stage.flexible .semester{width:320px}}
+
+/* Optional placement years sit between stage rows. */
+.placement-divider{display:flex;align-items:center;gap:14px;margin:-6px 0 14px;color:#746184;break-inside:avoid}
+.placement-divider::before,.placement-divider::after{content:"";height:1px;background:#a99ab6;flex:1;min-width:24px}
+.placement-divider button{font:inherit;font-size:13px;font-weight:600;color:#665176;border:0;background:transparent;padding:6px 8px;cursor:pointer;border-radius:4px}
+.placement-divider button:hover{background:#eae3f1;text-decoration:underline;text-underline-offset:3px}
+@media(max-width:850px){.placement-divider{min-width:820px}}
+@media print{.placement-divider{min-width:0;margin:0 0 10px}.placement-divider button{font-size:10px;padding:3px}}

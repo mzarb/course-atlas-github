@@ -353,6 +353,43 @@ function renderPgMap(mapModules) {
   $('map').append(stage);
 }
 
+// Separate only explicitly additional year-long placements from semester cards.
+const isYearLongPlacement = item =>
+  String(item.code || '').toUpperCase() === 'CE2021' ||
+  (/\byear[ -]long\b/i.test(item.title || '') && /\bplacement\b/i.test(item.title || ''));
+
+function splitPlacementRows(modules) {
+  const rows = [];
+  const placements = [];
+  for (const item of modules) {
+    if (!item.additional || item.sourceConflict) {
+      rows.push(item);
+    } else if (item.choices?.some(isYearLongPlacement)) {
+      placements.push({...item, choices: item.choices.filter(isYearLongPlacement)});
+      const otherChoices = item.choices.filter(choice => !isYearLongPlacement(choice));
+      if (otherChoices.length) rows.push({...item, choices: otherChoices});
+    } else if (isYearLongPlacement(item)) {
+      placements.push(item);
+    } else {
+      rows.push(item);
+    }
+  }
+  return {rows, placements};
+}
+
+function placementDivider(items, stageNumber) {
+  const line = document.createElement('div');
+  line.className = 'placement-divider';
+  for (const item of items) {
+    const control = button('Optional year-long placement', false, () => showModule(item));
+    control.removeAttribute('aria-pressed');
+    control.setAttribute('aria-label', 'Optional year-long placement after Stage ' + stageNumber + '. View details');
+    control.title = 'View placement details' + (item.groupNote ? ' · ' + item.groupNote : '');
+    line.append(control);
+  }
+  return line;
+}
+
 function renderMap() {
   const mapModules = visibleModules();
   const pg = course.level === 'PG';
@@ -365,14 +402,17 @@ function renderMap() {
     return;
   }
 
+  const placementLayout = splitPlacementRows(mapModules);
+  const semesterModules = placementLayout.rows;
+
   // Build columns only from semesters that contain at least one visible row.
   // This removes an empty Semester 3 column without sacrificing alignment when
   // a real summer/placement option is present on the selected route.
-  const semesters = [...new Set(mapModules.map(item => item.semester))].sort((a, b) => a - b);
+  const semesters = [...new Set(semesterModules.map(item => item.semester))].sort((a, b) => a - b);
   $('map').style.setProperty('--semester-count', semesters.length);
 
   for (const stageNumber of [...new Set(mapModules.map(item => item.stage))].sort((a, b) => a - b)) {
-    const rows = mapModules.filter(item => item.stage === stageNumber);
+    const rows = semesterModules.filter(item => item.stage === stageNumber);
     const counted = awardRows(rows);
     const sum = counted.every(item => item.credits !== null) ? counted.reduce((total, item) => total + item.credits, 0) : null;
     const box = document.createElement('article');
@@ -389,6 +429,8 @@ function renderMap() {
       box.append(cell);
     }
     $('map').append(box);
+    const placements = placementLayout.placements.filter(item => item.stage === stageNumber);
+    if (placements.length) $('map').append(placementDivider(placements, stageNumber));
   }
 }
 
