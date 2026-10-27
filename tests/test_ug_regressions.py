@@ -48,3 +48,19 @@ class UGRegressionTests(unittest.TestCase):
  def test_unreadable_semester_is_not_guessed(self):
   with self.assertRaisesRegex(ValueError,'Wrapped semester'):
    parse_group('Group Code  PS1234 - Electives 7\nGroup Title  Choice group\n3  Semester  Elective  CM3152  Artificial Intelligence  Yes  2.0  15\n','test.pdf')
+
+class NonAwardProgressionTests(unittest.TestCase):
+ def sample(self,statement):
+  return HEADER+statement+'\nStage 1 / Semester 1\nCore\nCM1120   Database Systems   1.0   15\nCM1607   English Communication Skills   1.0   15\n'
+ def test_required_progression_credits_outside_award(self):
+  c=parse(self.sample('CM1607 English Communication Skills is a core module, which is required for progression to Stage 2 but the 15 SCQF credits do not contribute to any award.'),'test.pdf')
+  m=next(m for m in c['modules'] if m['code']=='CM1607')
+  self.assertTrue(m['additional'])
+  self.assertTrue(m['nonAwardRequired'])
+  self.assertEqual(m['type'],'core')
+ def test_surplus_without_explicit_statement_still_blocks(self):
+  with self.assertRaises(ValueError):parse(self.sample(''),'test.pdf')
+ def test_wrong_credit_statement_still_blocks(self):
+  with self.assertRaises(ValueError):parse(self.sample('CM1607 English Communication Skills: the 30 SCQF credits do not contribute to any award.'),'test.pdf')
+ def test_statement_cannot_cross_another_module_code(self):
+  with self.assertRaises(ValueError):parse(self.sample('CM1607 English Communication Skills and CM9999 Other: the 15 SCQF credits do not contribute to any award.'),'test.pdf')

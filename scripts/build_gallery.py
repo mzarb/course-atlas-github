@@ -490,6 +490,21 @@ def parse(text, filename):
         if re.search(r'\b' + re.escape(m['code']) + r'\s+[^.]*?is for additional credit only\.', flat, re.I):
             m['additional'] = True
 
+    # A required progression module can explicitly carry credits outside the award.
+    # Bind the statement to one module code, within one sentence, and require its
+    # stated credit value to match the schedule; never infer this from a surplus.
+    for m in modules:
+        statement = re.search(
+            r'\b' + re.escape(m['code']) +
+            r'\s+(?:(?!\b[A-Z]{2,4}\d{3,4}\b)[^.!?]){0,350}?'
+            r'\b(\d+)\s+(?:SCQF\s+)?credits?\s+do not contribute to (?:any|the) award\b',
+            flat, re.I,
+        )
+        if statement and int(statement[1]) == m['credits']:
+            m['additional'] = True
+            m['nonAwardRequired'] = bool(re.search(r'\brequired for progression\b', statement[0], re.I))
+            m['nonAwardReason'] = statement[0].strip() + '.'
+
     route_names = extract_route_names(text)
     used_routes = sorted({r for m in modules for r in m['routeIds']})
     raw_pathways = {r: route_names[r].strip() for r in used_routes if r in route_names}

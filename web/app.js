@@ -250,7 +250,8 @@ function card(item) {
   const kind = item.sourceConflict ? 'conflict' : item.additional ? 'additional' : item.type;
   element.className = 'card ' + kind;
   let creditText = item.credits === null ? 'Credits not listed' : item.credits + ' credits';
-  if (item.placementOption || placementGroup) creditText += ' · Optional placement';
+  if (item.nonAwardRequired) creditText += ' · Required for progression';
+  else if (item.placementOption || placementGroup) creditText += ' · Optional placement';
   else if (item.additional) creditText += ' · Additional option';
   const statusText = item.sourceConflict ? ' · Source conflict' : item.additional && !item.placementOption ? ' · Outside award' : '';
   element.innerHTML = `<span class="code">${esc(item.code)}</span><span class="name">${esc(displayTitle(item))}</span><span class="card-bottom"><span>${creditText}${statusText}</span><span aria-hidden="true">›</span></span>`;
@@ -438,7 +439,9 @@ function showModule(item) {
   const placementGroup = isPlacementElectiveGroup(item);
   $('detail-kind').textContent = item.sourceConflict
     ? 'Source conflict'
-    : item.placementOption || placementGroup
+    : item.nonAwardRequired
+      ? 'Required progression module'
+      : item.placementOption || placementGroup
       ? 'Optional placement'
       : item.additional
         ? 'Additional option'
@@ -457,6 +460,7 @@ function showModule(item) {
   let body = `<dl><div><dt>${locationLabel}</dt><dd>Stage ${item.stage} · Semester ${item.semester}</dd></div><div><dt>SCQF credits</dt><dd>${item.credits === null ? 'Not in this export' : item.credits}</dd></div></dl>`;
   if (explanation) body += '<p>' + esc(explanation) + '</p>';
   if (item.placementOption) body += '<p>This is an optional placement module. The CAD states that placement credits are additional to the 180-credit MSc award.</p>';
+  else if (item.nonAwardRequired) body += '<p>This module is required for progression, but its credits do not contribute to the award.</p>';
   else if (item.additional) body += '<p>This additional option does not contribute to the award credit total.</p>';
   if (item.spansSemesters === 2) body += '<p>This module spans two teaching periods; its credits are counted once.</p>';
   $('detail-body').innerHTML = body;
